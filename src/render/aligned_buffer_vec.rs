@@ -1,11 +1,16 @@
 use bevy::{
-    core::{cast_slice, Pod},
+    core::{ cast_slice, Pod },
     log::trace,
     render::{
         render_resource::{
-            Buffer, BufferAddress, BufferDescriptor, BufferUsages, ShaderSize, ShaderType,
+            Buffer,
+            BufferAddress,
+            BufferDescriptor,
+            BufferUsages,
+            ShaderSize,
+            ShaderType,
         },
-        renderer::{RenderDevice, RenderQueue},
+        renderer::{ RenderDevice, RenderQueue },
     },
 };
 use copyless::VecHelper;
@@ -49,7 +54,7 @@ pub struct AlignedBufferVec<T: Pod + ShaderSize> {
 
 impl<T: Pod + ShaderType + ShaderSize> Default for AlignedBufferVec<T> {
     fn default() -> Self {
-        let item_size = std::mem::size_of::<T>();
+        let item_size = size_of::<T>();
         let aligned_size = <T as ShaderSize>::SHADER_SIZE.get() as usize;
         assert!(aligned_size >= item_size);
         Self {
@@ -83,7 +88,7 @@ impl<T: Pod + ShaderType + ShaderSize> AlignedBufferVec<T> {
     pub fn new(
         buffer_usage: BufferUsages,
         item_align: Option<NonZeroU64>,
-        label: Option<String>,
+        label: Option<String>
     ) -> Self {
         // GPU-aligned item size, compatible with WGSL rules
         let item_size = <T as ShaderSize>::SHADER_SIZE.get() as usize;
@@ -97,11 +102,7 @@ impl<T: Pod + ShaderType + ShaderSize> AlignedBufferVec<T> {
         } else {
             item_size
         };
-        trace!(
-            "AlignedBufferVec: item_size={} aligned_size={}",
-            item_size,
-            aligned_size
-        );
+        trace!("AlignedBufferVec: item_size={} aligned_size={}", item_size, aligned_size);
         if buffer_usage.contains(BufferUsages::UNIFORM) {
             <T as ShaderType>::assert_uniform_compat();
         }
@@ -164,12 +165,16 @@ impl<T: Pod + ShaderType + ShaderSize> AlignedBufferVec<T> {
                 size
             );
             self.capacity = capacity;
-            self.buffer = Some(device.create_buffer(&BufferDescriptor {
-                label: self.label.as_ref().map(|s| &s[..]),
-                size: size as BufferAddress,
-                usage: BufferUsages::COPY_DST | self.buffer_usage,
-                mapped_at_creation: false,
-            }));
+            self.buffer = Some(
+                device.create_buffer(
+                    &(BufferDescriptor {
+                        label: self.label.as_ref().map(|s| &s[..]),
+                        size: size as BufferAddress,
+                        usage: BufferUsages::COPY_DST | self.buffer_usage,
+                        mapped_at_creation: false,
+                    })
+                )
+            );
             // FIXME - this discards the old content if any!!!
             true
         } else {
@@ -233,7 +238,7 @@ impl<T: Pod + ShaderType + ShaderSize> std::ops::IndexMut<usize> for AlignedBuff
 #[cfg(test)]
 mod tests {
     use bevy::math::Vec3;
-    use bytemuck::{Pod, Zeroable};
+    use bytemuck::{ Pod, Zeroable };
 
     use super::*;
 
@@ -289,7 +294,7 @@ mod tests {
             let mut abv = AlignedBufferVec::<GpuDummy>::new(
                 BufferUsages::STORAGE,
                 NonZeroU64::new(item_align),
-                None,
+                None
             );
             assert_eq!(abv.aligned_size(), expected_aligned_size);
             assert!(abv.is_empty());
@@ -310,7 +315,7 @@ mod tests {
             let mut abv = AlignedBufferVec::<GpuDummyComposed>::new(
                 BufferUsages::STORAGE,
                 NonZeroU64::new(item_align),
-                None,
+                None
             );
             assert_eq!(abv.aligned_size(), expected_aligned_size);
             assert!(abv.is_empty());
@@ -331,14 +336,14 @@ mod tests {
             let mut abv = AlignedBufferVec::<GpuDummyLarge>::new(
                 BufferUsages::STORAGE,
                 NonZeroU64::new(item_align),
-                None,
+                None
             );
             assert_eq!(abv.aligned_size(), expected_aligned_size);
             assert!(abv.is_empty());
             abv.push(GpuDummyLarge {
                 simple: Default::default(),
                 tag: 0,
-                large: [0.; 128],
+                large: [0.0; 128],
             });
             assert!(!abv.is_empty());
             assert_eq!(abv.len(), 1);
@@ -360,16 +365,18 @@ mod gpu_tests {
 
         // Create a dummy CommandBuffer to force the write_buffer() call to have any
         // effect.
-        let encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("test"),
-        });
+        let encoder = device.create_command_encoder(
+            &(wgpu::CommandEncoderDescriptor {
+                label: Some("test"),
+            })
+        );
         let command_buffer = encoder.finish();
 
         let item_align = device.limits().min_storage_buffer_offset_alignment as u64;
         let mut abv = AlignedBufferVec::<GpuDummyComposed>::new(
             BufferUsages::STORAGE | BufferUsages::MAP_READ,
             NonZeroU64::new(item_align),
-            None,
+            None
         );
         let final_align = item_align.max(<GpuDummyComposed as ShaderSize>::SHADER_SIZE.get());
         assert_eq!(abv.aligned_size(), final_align as usize);
@@ -414,11 +421,12 @@ mod gpu_tests {
         let view = buffer.get_mapped_range();
 
         // Validate content
-        assert_eq!(view.len(), final_align as usize * CAPACITY);
+        assert_eq!(view.len(), (final_align as usize) * CAPACITY);
         for i in 0..3 {
-            let offset = i * final_align as usize;
-            let dummy_composed: &[GpuDummyComposed] =
-                cast_slice(&view[offset..offset + std::mem::size_of::<GpuDummyComposed>()]);
+            let offset = i * (final_align as usize);
+            let dummy_composed: &[GpuDummyComposed] = cast_slice(
+                &view[offset..offset + size_of::<GpuDummyComposed>()]
+            );
             assert_eq!(dummy_composed[0].tag, (i + 1) as u32);
         }
     }

@@ -1,12 +1,17 @@
 use bevy::{
-    core::{cast_slice, Pod},
+    core::{ cast_slice, Pod },
     log::trace,
     render::{
         render_resource::{
-            Buffer, BufferAddress, BufferDescriptor, BufferUsages, CommandEncoder, ShaderSize,
+            Buffer,
+            BufferAddress,
+            BufferDescriptor,
+            BufferUsages,
+            CommandEncoder,
+            ShaderSize,
             ShaderType,
         },
-        renderer::{RenderDevice, RenderQueue},
+        renderer::{ RenderDevice, RenderQueue },
     },
 };
 use copyless::VecHelper;
@@ -36,11 +41,7 @@ impl AllocatedBuffer {
     ///
     /// On capacity grow, the size is valid until the next buffer swap.
     pub fn allocated_size(&self) -> usize {
-        if self.old_buffer.is_some() {
-            self.old_size
-        } else {
-            self.size
-        }
+        if self.old_buffer.is_some() { self.old_size } else { self.size }
     }
 }
 
@@ -80,7 +81,7 @@ impl AllocatedBuffer {
 ///   pending.
 ///
 /// [`BufferVec`]: bevy::render::render_resource::BufferVec
-/// [`AlignedBufferVec`]: bevy_haanabi::render::aligned_buffer_vec::AlignedBufferVec
+/// [`AlignedBufferVec`]: bevy_hanabi::render::aligned_buffer_vec::AlignedBufferVec
 #[derive(Debug)]
 pub struct BufferTable<T: Pod + ShaderSize> {
     /// GPU buffer if already allocated, or `None` otherwise.
@@ -115,7 +116,7 @@ pub struct BufferTable<T: Pod + ShaderSize> {
 
 impl<T: Pod + ShaderSize> Default for BufferTable<T> {
     fn default() -> Self {
-        let item_size = std::mem::size_of::<T>();
+        let item_size = size_of::<T>();
         let aligned_size = <T as ShaderSize>::SHADER_SIZE.get() as usize;
         assert!(aligned_size >= item_size);
         Self {
@@ -152,7 +153,7 @@ impl<T: Pod + ShaderSize> BufferTable<T> {
     pub fn new(
         buffer_usage: BufferUsages,
         item_align: Option<NonZeroU64>,
-        label: Option<String>,
+        label: Option<String>
     ) -> Self {
         // GPU-aligned item size, compatible with WGSL rules
         let item_size = <T as ShaderSize>::SHADER_SIZE.get() as usize;
@@ -272,7 +273,7 @@ impl<T: Pod + ShaderSize> BufferTable<T> {
             self.capacity,
             self.active_size
         );
-        let index = if self.free_indices.is_empty() {
+        let index = (if self.free_indices.is_empty() {
             let index = self.active_size;
             if index == self.capacity {
                 self.capacity += 1;
@@ -284,9 +285,8 @@ impl<T: Pod + ShaderSize> BufferTable<T> {
             // Note: this is inefficient O(n) but we need to apply the same logic as the
             // EffectCache because we rely on indices being in sync.
             self.free_indices.remove(0)
-        } as usize;
-        let allocated_size = self
-            .buffer
+        }) as usize;
+        let allocated_size = self.buffer
             .as_ref()
             .map(|ab| ab.allocated_size())
             .unwrap_or(0);
@@ -316,7 +316,7 @@ impl<T: Pod + ShaderSize> BufferTable<T> {
     #[allow(dead_code)]
     pub fn remove(&mut self, id: BufferTableId) {
         let index = id.0;
-        assert!(index < self.active_size as u32);
+        assert!(index < (self.active_size as u32));
 
         // let allocated_size = self
         //     .buffer
@@ -328,14 +328,13 @@ impl<T: Pod + ShaderSize> BufferTable<T> {
 
         // If this is the last item in the active zone, just shrink the active zone
         // (implicit free list).
-        if index == self.active_size as u32 - 1 {
+        if index == (self.active_size as u32) - 1 {
             self.active_size -= 1;
             self.capacity -= 1;
         } else {
             // This is very inefficient but we need to apply the same logic as the
             // EffectCache because we rely on indices being in sync.
-            let pos = self
-                .free_indices
+            let pos = self.free_indices
                 .binary_search(&index) // will fail
                 .unwrap_or_else(|e| e); // will get position of insertion
             self.free_indices.insert(pos, index);
@@ -362,7 +361,10 @@ impl<T: Pod + ShaderSize> BufferTable<T> {
         // The allocated capacity is the capacity of the currently allocated GPU buffer,
         // which can be different from the expected capacity (self.capacity) for next
         // update.
-        let allocated_size = self.buffer.as_ref().map(|ab| ab.size).unwrap_or(0);
+        let allocated_size = self.buffer
+            .as_ref()
+            .map(|ab| ab.size)
+            .unwrap_or(0);
         let size = self.aligned_size * self.capacity;
         let reallocated = if size > allocated_size {
             trace!(
@@ -373,12 +375,14 @@ impl<T: Pod + ShaderSize> BufferTable<T> {
             );
 
             // Create the new buffer, swapping with the old one if any
-            let new_buffer = device.create_buffer(&BufferDescriptor {
-                label: self.label.as_ref().map(|s| &s[..]),
-                size: size as BufferAddress,
-                usage: self.buffer_usage,
-                mapped_at_creation: false,
-            });
+            let new_buffer = device.create_buffer(
+                &(BufferDescriptor {
+                    label: self.label.as_ref().map(|s| &s[..]),
+                    size: size as BufferAddress,
+                    usage: self.buffer_usage,
+                    mapped_at_creation: false,
+                })
+            );
             if let Some(ab) = self.buffer.as_mut() {
                 // If there's any data currently in the GPU buffer, we need to copy it on next
                 // update to preserve it, but only if there's no pending copy already.
@@ -414,7 +418,7 @@ impl<T: Pod + ShaderSize> BufferTable<T> {
             let buffer = ab.old_buffer.as_ref().unwrap_or(&ab.buffer);
             for (index, content) in self.pending_values.drain(..) {
                 let byte_size = self.aligned_size;
-                let byte_offset = byte_size * index as usize;
+                let byte_offset = byte_size * (index as usize);
 
                 // Copy Rust value into a GPU-ready format, including GPU padding.
                 // TODO - Do that in insert()!
@@ -486,9 +490,9 @@ impl<T: Pod + ShaderSize> BufferTable<T> {
     pub fn write_buffer(&self, encoder: &mut CommandEncoder) {
         // Check if there's any work to do: either some pending values to upload or some
         // existing buffer to copy into a newly-allocated one.
-        if self.pending_values.is_empty()
-            && self
-                .buffer
+        if
+            self.pending_values.is_empty() &&
+            self.buffer
                 .as_ref()
                 .map(|ab| ab.old_buffer.is_none())
                 .unwrap_or(true)
@@ -501,7 +505,7 @@ impl<T: Pod + ShaderSize> BufferTable<T> {
             self.pending_values.len(),
             self.item_size,
             self.aligned_size,
-            self.buffer,
+            self.buffer
         );
 
         // If there's no more GPU buffer, there's nothing to do
@@ -514,7 +518,13 @@ impl<T: Pod + ShaderSize> BufferTable<T> {
         // which stays alive until the copy is done (but we don't need to care about
         // keeping it alive, wgpu does that for us).
         if let Some(old_buffer) = ab.old_buffer.as_ref() {
-            trace!("Copy old buffer id {:?} of size {} bytes into newly-allocated buffer {:?} of size {} bytes.", old_buffer.id(), ab.old_size, ab.buffer.id(), ab.size);
+            trace!(
+                "Copy old buffer id {:?} of size {} bytes into newly-allocated buffer {:?} of size {} bytes.",
+                old_buffer.id(),
+                ab.old_size,
+                ab.buffer.id(),
+                ab.size
+            );
             encoder.copy_buffer_to_buffer(old_buffer, 0, &ab.buffer, 0, ab.old_size as u64);
         }
     }
@@ -523,7 +533,7 @@ impl<T: Pod + ShaderSize> BufferTable<T> {
 #[cfg(test)]
 mod tests {
     use bevy::math::Vec3;
-    use bytemuck::{Pod, Zeroable};
+    use bytemuck::{ Pod, Zeroable };
 
     use super::*;
 
@@ -579,7 +589,7 @@ mod tests {
             let mut table = BufferTable::<GpuDummy>::new(
                 BufferUsages::STORAGE,
                 NonZeroU64::new(item_align),
-                None,
+                None
             );
             assert_eq!(table.aligned_size(), expected_aligned_size);
             assert!(table.is_empty());
@@ -600,7 +610,7 @@ mod tests {
             let mut table = BufferTable::<GpuDummyComposed>::new(
                 BufferUsages::STORAGE,
                 NonZeroU64::new(item_align),
-                None,
+                None
             );
             assert_eq!(table.aligned_size(), expected_aligned_size);
             assert!(table.is_empty());
@@ -621,14 +631,14 @@ mod tests {
             let mut table = BufferTable::<GpuDummyLarge>::new(
                 BufferUsages::STORAGE,
                 NonZeroU64::new(item_align),
-                None,
+                None
             );
             assert_eq!(table.aligned_size(), expected_aligned_size);
             assert!(table.is_empty());
             table.insert(GpuDummyLarge {
                 simple: Default::default(),
                 tag: 0,
-                large: [0.; 128],
+                large: [0.0; 128],
             });
             assert!(!table.is_empty());
             assert_eq!(table.len(), 1);
@@ -643,7 +653,7 @@ mod gpu_tests {
     use bevy::render::render_resource::BufferSlice;
     use std::fmt::Write;
     use tests::*;
-    use wgpu::{BufferView, CommandBuffer};
+    use wgpu::{ BufferView, CommandBuffer };
 
     /// Read data from GPU back into CPU memory.
     ///
@@ -667,7 +677,7 @@ mod gpu_tests {
     fn submit_gpu_and_wait(
         device: &RenderDevice,
         queue: &RenderQueue,
-        command_buffer: CommandBuffer,
+        command_buffer: CommandBuffer
     ) {
         // Queue command
         queue.submit([command_buffer]);
@@ -704,11 +714,13 @@ mod gpu_tests {
     fn write_buffers_and_wait<T: Pod + ShaderSize>(
         table: &BufferTable<T>,
         device: &RenderDevice,
-        queue: &RenderQueue,
+        queue: &RenderQueue
     ) {
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("test"),
-        });
+        let mut encoder = device.create_command_encoder(
+            &(wgpu::CommandEncoderDescriptor {
+                label: Some("test"),
+            })
+        );
         table.write_buffer(&mut encoder);
         let command_buffer = encoder.finish();
         submit_gpu_and_wait(device, queue, command_buffer);
@@ -726,7 +738,7 @@ mod gpu_tests {
         let mut table = BufferTable::<GpuDummyComposed>::new(
             BufferUsages::STORAGE | BufferUsages::MAP_READ,
             NonZeroU64::new(item_align),
-            None,
+            None
         );
         let final_align = item_align.max(<GpuDummyComposed as ShaderSize>::SHADER_SIZE.get());
         assert_eq!(table.aligned_size(), final_align as usize);
@@ -768,17 +780,12 @@ mod gpu_tests {
         assert!(!table.is_empty());
         assert_eq!(table.len(), len);
         assert!(table.capacity() >= len);
-        let ab = table
-            .buffer
+        let ab = table.buffer
             .as_ref()
             .expect("GPU buffer should be allocated after allocate_gpu()");
         assert!(ab.old_buffer.is_none()); // no previous copy
         assert_eq!(ab.size, table.aligned_size() * len);
-        println!(
-            "Allocated buffer #{:?} of size {} bytes",
-            ab.buffer.id(),
-            ab.size
-        );
+        println!("Allocated buffer #{:?} of size {} bytes", ab.buffer.id(), ab.size);
         let ab_buffer = ab.buffer.clone();
 
         // Another allocate_gpu() is a no-op
@@ -786,8 +793,7 @@ mod gpu_tests {
         assert!(!table.is_empty());
         assert_eq!(table.len(), len);
         assert!(table.capacity() >= len);
-        let ab = table
-            .buffer
+        let ab = table.buffer
             .as_ref()
             .expect("GPU buffer should be allocated after allocate_gpu()");
         assert!(ab.old_buffer.is_none()); // no previous copy
@@ -803,20 +809,18 @@ mod gpu_tests {
             {
                 let slice = buffer.slice(..);
                 let view = read_back_gpu(&device, slice);
-                println!(
-                    "GPU data read back to CPU for validation: {} bytes",
-                    view.len()
-                );
+                println!("GPU data read back to CPU for validation: {} bytes", view.len());
 
                 // Validate content
-                assert_eq!(view.len(), final_align as usize * table.capacity());
+                assert_eq!(view.len(), (final_align as usize) * table.capacity());
                 for i in 0..len {
-                    let offset = i * final_align as usize;
-                    let item_size = std::mem::size_of::<GpuDummyComposed>();
+                    let offset = i * (final_align as usize);
+                    let item_size = size_of::<GpuDummyComposed>();
                     let src = &view[offset..offset + 16];
                     println!("{}", to_hex_string(src));
-                    let dummy_composed: &[GpuDummyComposed] =
-                        cast_slice(&view[offset..offset + item_size]);
+                    let dummy_composed: &[GpuDummyComposed] = cast_slice(
+                        &view[offset..offset + item_size]
+                    );
                     assert_eq!(dummy_composed[0].tag, (i + 1) as u32);
                 }
             }
@@ -850,18 +854,13 @@ mod gpu_tests {
         assert!(!table.is_empty());
         assert_eq!(table.len(), len);
         assert!(table.capacity() >= len);
-        let ab = table
-            .buffer
+        let ab = table.buffer
             .as_ref()
             .expect("GPU buffer should be allocated after allocate_gpu()");
         assert_eq!(ab.size, table.aligned_size() * len);
         assert!(ab.old_buffer.is_some()); // old buffer to copy
         assert_ne!(ab.old_buffer.as_ref().unwrap().id(), ab.buffer.id());
-        println!(
-            "Allocated new buffer #{:?} of size {} bytes",
-            ab.buffer.id(),
-            ab.size
-        );
+        println!("Allocated new buffer #{:?} of size {} bytes", ab.buffer.id(), ab.size);
 
         // Write buffer (CPU -> GPU)
         write_buffers_and_wait(&table, &device, &queue);
@@ -872,20 +871,18 @@ mod gpu_tests {
             {
                 let slice = buffer.slice(..);
                 let view = read_back_gpu(&device, slice);
-                println!(
-                    "GPU data read back to CPU for validation: {} bytes",
-                    view.len()
-                );
+                println!("GPU data read back to CPU for validation: {} bytes", view.len());
 
                 // Validate content
-                assert_eq!(view.len(), final_align as usize * table.capacity());
+                assert_eq!(view.len(), (final_align as usize) * table.capacity());
                 for i in 0..len {
-                    let offset = i * final_align as usize;
-                    let item_size = std::mem::size_of::<GpuDummyComposed>();
+                    let offset = i * (final_align as usize);
+                    let item_size = size_of::<GpuDummyComposed>();
                     let src = &view[offset..offset + 16];
                     println!("{}", to_hex_string(src));
-                    let dummy_composed: &[GpuDummyComposed] =
-                        cast_slice(&view[offset..offset + item_size]);
+                    let dummy_composed: &[GpuDummyComposed] = cast_slice(
+                        &view[offset..offset + item_size]
+                    );
                     assert_eq!(dummy_composed[0].tag, (i + 1) as u32);
                 }
             }
@@ -910,8 +907,7 @@ mod gpu_tests {
         assert!(!table.is_empty());
         assert_eq!(table.len(), len);
         assert!(table.capacity() >= len);
-        let ab = table
-            .buffer
+        let ab = table.buffer
             .as_ref()
             .expect("GPU buffer should be allocated after allocate_gpu()");
         assert_eq!(ab.size, table.aligned_size() * (len + 1)); // GPU buffer kept its size
@@ -926,20 +922,18 @@ mod gpu_tests {
             {
                 let slice = buffer.slice(..);
                 let view = read_back_gpu(&device, slice);
-                println!(
-                    "GPU data read back to CPU for validation: {} bytes",
-                    view.len()
-                );
+                println!("GPU data read back to CPU for validation: {} bytes", view.len());
 
                 // Validate content
-                assert!(view.len() >= final_align as usize * table.capacity()); // note the >=, the buffer is over-allocated
+                assert!(view.len() >= (final_align as usize) * table.capacity()); // note the >=, the buffer is over-allocated
                 for i in 0..len {
-                    let offset = i * final_align as usize;
-                    let item_size = std::mem::size_of::<GpuDummyComposed>();
+                    let offset = i * (final_align as usize);
+                    let item_size = size_of::<GpuDummyComposed>();
                     let src = &view[offset..offset + 16];
                     println!("{}", to_hex_string(src));
-                    let dummy_composed: &[GpuDummyComposed] =
-                        cast_slice(&view[offset..offset + item_size]);
+                    let dummy_composed: &[GpuDummyComposed] = cast_slice(
+                        &view[offset..offset + item_size]
+                    );
                     assert_eq!(dummy_composed[0].tag, (i + 1) as u32);
                 }
             }
@@ -964,8 +958,7 @@ mod gpu_tests {
         assert!(!table.is_empty());
         assert_eq!(table.len(), len);
         assert!(table.capacity() >= len);
-        let ab = table
-            .buffer
+        let ab = table.buffer
             .as_ref()
             .expect("GPU buffer should be allocated after allocate_gpu()");
         assert_eq!(ab.size, table.aligned_size() * (len + 2)); // GPU buffer kept its size
@@ -980,21 +973,19 @@ mod gpu_tests {
             {
                 let slice = buffer.slice(..);
                 let view = read_back_gpu(&device, slice);
-                println!(
-                    "GPU data read back to CPU for validation: {} bytes",
-                    view.len()
-                );
+                println!("GPU data read back to CPU for validation: {} bytes", view.len());
 
                 // Validate content
-                assert!(view.len() >= final_align as usize * table.capacity()); // note the >=, the buffer is over-allocated
+                assert!(view.len() >= (final_align as usize) * table.capacity()); // note the >=, the buffer is over-allocated
                 for i in 0..len {
-                    let offset = i * final_align as usize;
-                    let item_size = std::mem::size_of::<GpuDummyComposed>();
+                    let offset = i * (final_align as usize);
+                    let item_size = size_of::<GpuDummyComposed>();
                     let src = &view[offset..offset + 16];
                     println!("{}", to_hex_string(src));
                     if i > 0 {
-                        let dummy_composed: &[GpuDummyComposed] =
-                            cast_slice(&view[offset..offset + item_size]);
+                        let dummy_composed: &[GpuDummyComposed] = cast_slice(
+                            &view[offset..offset + item_size]
+                        );
                         assert_eq!(dummy_composed[0].tag, (i + 1) as u32);
                     }
                 }
@@ -1013,11 +1004,7 @@ mod gpu_tests {
         });
         assert_eq!(row.0, 0);
         len += 1;
-        println!(
-            "Added 1 row to grow capacity from {} to {}.",
-            old_capacity,
-            table.capacity()
-        );
+        println!("Added 1 row to grow capacity from {} to {}.", old_capacity, table.capacity());
         let len = len as usize;
 
         // This doesn't reallocate the GPU buffer since we used a free list entry
@@ -1025,8 +1012,7 @@ mod gpu_tests {
         assert!(!table.is_empty());
         assert_eq!(table.len(), len);
         assert!(table.capacity() >= len);
-        let ab = table
-            .buffer
+        let ab = table.buffer
             .as_ref()
             .expect("GPU buffer should be allocated after allocate_gpu()");
         assert_eq!(ab.size, table.aligned_size() * 4); // 4 == last time we grew
@@ -1041,20 +1027,18 @@ mod gpu_tests {
             {
                 let slice = buffer.slice(..);
                 let view = read_back_gpu(&device, slice);
-                println!(
-                    "GPU data read back to CPU for validation: {} bytes",
-                    view.len()
-                );
+                println!("GPU data read back to CPU for validation: {} bytes", view.len());
 
                 // Validate content
-                assert!(view.len() >= final_align as usize * table.capacity());
+                assert!(view.len() >= (final_align as usize) * table.capacity());
                 for i in 0..len {
-                    let offset = i * final_align as usize;
-                    let item_size = std::mem::size_of::<GpuDummyComposed>();
+                    let offset = i * (final_align as usize);
+                    let item_size = size_of::<GpuDummyComposed>();
                     let src = &view[offset..offset + 16];
                     println!("{}", to_hex_string(src));
-                    let dummy_composed: &[GpuDummyComposed] =
-                        cast_slice(&view[offset..offset + item_size]);
+                    let dummy_composed: &[GpuDummyComposed] = cast_slice(
+                        &view[offset..offset + item_size]
+                    );
                     assert_eq!(dummy_composed[0].tag, (i + 1) as u32);
                 }
             }
@@ -1072,11 +1056,7 @@ mod gpu_tests {
         });
         assert_eq!(row.0, 3);
         len += 1;
-        println!(
-            "Added 1 row to grow capacity from {} to {}.",
-            old_capacity,
-            table.capacity()
-        );
+        println!("Added 1 row to grow capacity from {} to {}.", old_capacity, table.capacity());
         let len = len as usize;
 
         // This doesn't reallocate the GPU buffer since we used an implicit free entry
@@ -1084,8 +1064,7 @@ mod gpu_tests {
         assert!(!table.is_empty());
         assert_eq!(table.len(), len);
         assert!(table.capacity() >= len);
-        let ab = table
-            .buffer
+        let ab = table.buffer
             .as_ref()
             .expect("GPU buffer should be allocated after allocate_gpu()");
         assert_eq!(ab.size, table.aligned_size() * 4); // 4 == last time we grew
@@ -1100,20 +1079,18 @@ mod gpu_tests {
             {
                 let slice = buffer.slice(..);
                 let view = read_back_gpu(&device, slice);
-                println!(
-                    "GPU data read back to CPU for validation: {} bytes",
-                    view.len()
-                );
+                println!("GPU data read back to CPU for validation: {} bytes", view.len());
 
                 // Validate content
-                assert!(view.len() >= final_align as usize * table.capacity());
+                assert!(view.len() >= (final_align as usize) * table.capacity());
                 for i in 0..len {
-                    let offset = i * final_align as usize;
-                    let item_size = std::mem::size_of::<GpuDummyComposed>();
+                    let offset = i * (final_align as usize);
+                    let item_size = size_of::<GpuDummyComposed>();
                     let src = &view[offset..offset + 16];
                     println!("{}", to_hex_string(src));
-                    let dummy_composed: &[GpuDummyComposed] =
-                        cast_slice(&view[offset..offset + item_size]);
+                    let dummy_composed: &[GpuDummyComposed] = cast_slice(
+                        &view[offset..offset + item_size]
+                    );
                     assert_eq!(dummy_composed[0].tag, (i + 1) as u32);
                 }
             }
